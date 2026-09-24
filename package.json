@@ -26,7 +26,7 @@
     "listings:refresh": "tsx scripts/refresh-listings.ts",
     "db:fixtures": "tsx scripts/seed-fixtures.ts",
     "fixtures:images": "node tests/fixtures/fixture-image-server.mjs",
-    "vercel-build": "prisma generate && prisma migrate deploy && tsx prisma/seed.ts && (tsx scripts/import-listings.ts --limit 8 --min-homes 40 || echo 'Listing import failed \u2014 continuing build') && next build"
+    "vercel-build": "node scripts/check-db-env.mjs && prisma generate && prisma migrate deploy && tsx prisma/seed.ts && (tsx scripts/import-listings.ts --limit 8 --min-homes 40 || echo 'Listing import failed \u2014 continuing build') && next build"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
