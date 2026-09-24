@@ -2,7 +2,7 @@
   "name": "howmuch",
   "version": "0.1.0",
   "private": true,
-  "description": "HOWMUCH? HOMES — See it. Guess it. A real-estate price guessing game.",
+  "description": "HOWMUCH? HOMES \u2014 See it. Guess it. A real-estate price guessing game.",
   "engines": {
     "node": ">=20.9"
   },
@@ -25,7 +25,8 @@
     "import:listings": "tsx scripts/import-listings.ts",
     "listings:refresh": "tsx scripts/refresh-listings.ts",
     "db:fixtures": "tsx scripts/seed-fixtures.ts",
-    "fixtures:images": "node tests/fixtures/fixture-image-server.mjs"
+    "fixtures:images": "node tests/fixtures/fixture-image-server.mjs",
+    "vercel-build": "prisma generate && prisma migrate deploy && tsx prisma/seed.ts && (tsx scripts/import-listings.ts --limit 8 --min-homes 40 || echo 'Listing import failed \u2014 continuing build') && next build"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

@@ -9,7 +9,12 @@ export default defineConfig({
   },
   // Optional here so `npm install` (prisma generate) works before .env exists;
   // migrate/seed commands still need DATABASE_URL.
+  // Migrations prefer a direct (unpooled) connection when the host provides one (Neon / Vercel Postgres).
   datasource: {
-    url: process.env.DATABASE_URL,
+    url:
+      process.env.DATABASE_URL_UNPOOLED ??
+      process.env.POSTGRES_URL_NON_POOLING ??
+      process.env.DATABASE_URL ??
+      process.env.POSTGRES_URL,
   },
 });

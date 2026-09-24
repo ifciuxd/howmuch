@@ -13,7 +13,11 @@ function int(v: string | undefined, fallback: number): number {
 
 export const env = {
   get appUrl(): string {
-    return (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+    const explicit = process.env.NEXT_PUBLIC_APP_URL;
+    if (explicit) return explicit.replace(/\/$/, "");
+    // On Vercel, fall back to the project's production domain (or this deployment's URL).
+    const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
+    return vercelHost ? `https://${vercelHost}` : "http://localhost:3000";
   },
   get isProduction(): boolean {
     return process.env.NODE_ENV === "production";

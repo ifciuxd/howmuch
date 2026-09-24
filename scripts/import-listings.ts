@@ -5,6 +5,7 @@
  *   npm run import:listings -- --limit 8                 # import up to 8 homes per search page
  *   npm run import:listings -- https://www.otodom.pl/pl/oferta/...   # specific listing or search URLs
  *   npm run import:listings -- --follow                  # open each listing for fuller facts (more requests)
+ *   npm run import:listings -- --min-homes 40            # skip entirely when ≥ 40 active homes exist
  *
  * Polite by design: robots.txt respected, ≥4 s between requests per host,
  * honest User-Agent, stops on 403/429/captcha. Images are hotlinked, not copied.
@@ -21,7 +22,20 @@ async function main() {
   const follow = args.includes("--follow");
   const limitIdx = args.indexOf("--limit");
   const limit = limitIdx >= 0 ? Number(args[limitIdx + 1]) : 8;
+  const minIdx = args.indexOf("--min-homes");
+  const minHomes = minIdx >= 0 ? Number(args[minIdx + 1]) : 0;
   const urls = args.filter((a, i) => /^https?:\/\//.test(a) && args[i - 1] !== "--limit");
+
+  // Used by deploy builds: only reach out to portals when the catalogue is thin.
+  if (minHomes > 0 && !dryRun) {
+    const { db } = await import("../src/database/client");
+    const current = await db.property.count({ where: { active: true } });
+    if (current >= minHomes) {
+      console.log(`HOWMUCH? listing import skipped — ${current} active homes (≥ ${minHomes}).`);
+      await db.$disconnect();
+      return;
+    }
+  }
   const targets = urls.length ? urls : LISTING_SOURCES.flatMap((s) => s.urls);
 
   const contact = process.env.IMPORTER_CONTACT || `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/about#sources`;
