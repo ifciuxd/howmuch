@@ -1,0 +1,424 @@
+// HOWMUCH? — database schema
+//
+// The game engine is product-agnostic (Game / GameRound / Guess / DailyChallenge /
+// LeaderboardEntry carry a `product` discriminator). HOWMUCH? HOMES is the first
+// product; its item type is `Property`. Future products (cars, watches…) add their
+// own item table and a nullable relation on GameRound / DailyChallengeRound.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Product {
+  HOMES
+}
+
+enum GameMode {
+  QUICK
+  DAILY
+  CITY
+  COUNTRY
+}
+
+enum GameStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+enum LeaderboardScope {
+  GLOBAL
+  DAILY
+  CITY
+  COUNTRY
+}
+
+enum DailyChallengeStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum PropertyType {
+  APARTMENT
+  STUDIO
+  PENTHOUSE
+  LOFT
+  HOUSE
+  TOWNHOUSE
+  VILLA
+}
+
+enum SourceKind {
+  DEMO
+  LISTING_PORTAL
+  MANUAL_CSV
+  MANUAL_JSON
+  OFFICIAL_API
+  LICENSED_DATASET
+}
+
+enum EntitlementType {
+  DAY_PASS
+  PRO
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  CANCELED
+  FAILED
+}
+
+// ─── People ──────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  /// Public display handle. Guests get a generated one ("Quiet Heron 482").
+  username      String?   @unique
+  role          Role      @default(USER)
+  /// Anonymous players are real rows so games, streaks and leaderboards work without sign-up.
+  isGuest       Boolean   @default(false)
+  bannedAt      DateTime?
+  banReason     String?
+  currentStreak Int       @default(0)
+  longestStreak Int       @default(0)
+  /// UTC date (YYYY-MM-DD) of the last completed daily challenge.
+  lastDailyDate String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts           Account[]
+  sessions           Session[]
+  games              Game[]
+  leaderboardEntries LeaderboardEntry[]
+  subscriptions      Subscription[]
+  auditLogs          AdminAuditLog[]
+
+  @@index([isGuest, createdAt])
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// ─── Content ─────────────────────────────────────────────────────────────
+
+model City {
+  id           String   @id @default(cuid())
+  slug         String   @unique
+  name         String
+  country      String
+  countryCode  String   @db.Char(2)
+  region       String?
+  /// Optional editorial hero image. Falls back to a property image.
+  heroImageUrl String?
+  blurb        String?
+  featured     Boolean  @default(false)
+  sortOrder    Int      @default(100)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  properties Property[]
+
+  @@index([countryCode])
+}
+
+model PropertySource {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  kind        SourceKind
+  description String?
+  /// Licensing terms / agreement reference for the data and images.
+  license     String?
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  properties Property[]
+}
+
+model Property {
+  id                 String       @id @default(cuid())
+  title              String
+  country            String
+  countryCode        String       @db.Char(2)
+  city               String
+  cityId             String
+  region             String?
+  neighborhood       String?
+  /// Internal only — never sent to players.
+  latitude           Float?
+  longitude          Float?
+  /// Whole units of `currency`. Server-only until a guess is locked.
+  price              Int
+  currency           String       @db.Char(3)
+  areaM2             Float?
+  rooms              Int?
+  bathrooms          Int?
+  propertyType       PropertyType
+  floor              Int?
+  yearBuilt          Int?
+  description        String?
+  /// Image URLs. Portal imports are displayed from the source (hotlinked), never re-hosted.
+  imageUrls          String[]
+  sourceName         String
+  sourceUrl          String?
+  sourceListingId    String?
+  sourceId           String?
+  /// 1 (easy) – 10 (brutal). Independent of score.
+  difficulty         Int          @default(5)
+  active             Boolean      @default(true)
+  rightsVerified     Boolean      @default(false)
+  imageUsageRights   String?
+  /// Test fixtures only — never real content.
+  isDemo             Boolean      @default(false)
+  /// Last time the source listing was re-checked (portal imports).
+  lastCheckedAt      DateTime?
+  /// Players' browsers report images that fail to load; high counts trigger review.
+  brokenImageReports Int          @default(0)
+  /// Optional enrichment. `aiInsight` is AI-generated and must be labelled as such.
+  aiInsight          String?
+  aiDifficulty       Int?
+  aiGeneratedAt      DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  cityRef     City                  @relation(fields: [cityId], references: [id])
+  source      PropertySource?       @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  rounds      GameRound[]
+  dailyRounds DailyChallengeRound[]
+
+  @@unique([sourceName, sourceListingId])
+  @@index([active, rightsVerified])
+  @@index([cityId])
+  @@index([countryCode])
+}
+
+// ─── Game engine ─────────────────────────────────────────────────────────
+
+model Game {
+  id               String     @id @default(cuid())
+  product          Product    @default(HOMES)
+  mode             GameMode
+  status           GameStatus @default(ACTIVE)
+  userId           String
+  /// City slug (CITY), country code (COUNTRY), date (DAILY) or null (QUICK).
+  scopeKey         String?
+  dailyChallengeId String?
+  roundCount       Int        @default(5)
+  totalScore       Int        @default(0)
+  startedAt        DateTime   @default(now())
+  completedAt      DateTime?
+
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dailyChallenge     DailyChallenge?    @relation(fields: [dailyChallengeId], references: [id], onDelete: SetNull)
+  rounds             GameRound[]
+  leaderboardEntries LeaderboardEntry[]
+
+  /// A player gets exactly one attempt per daily challenge.
+  @@unique([userId, dailyChallengeId])
+  @@index([userId, startedAt])
+  @@index([mode, status, completedAt])
+}
+
+model GameRound {
+  id         String    @id @default(cuid())
+  gameId     String
+  index      Int
+  propertyId String
+  /// First time the round was served to the player.
+  shownAt    DateTime?
+
+  game     Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  guess    Guess?
+
+  @@unique([gameId, index])
+  /// The same item never repeats inside a game.
+  @@unique([gameId, propertyId])
+  @@index([propertyId])
+}
+
+model Guess {
+  id          String   @id @default(cuid())
+  /// One guess per round — enforced by the database.
+  roundId     String   @unique
+  value       Int
+  currency    String   @db.Char(3)
+  /// Snapshot of the answer at guess time.
+  actualValue Int
+  errorPct    Float
+  accuracy    Float
+  score       Int
+  tier        String
+  timeTakenMs Int?
+  createdAt   DateTime @default(now())
+
+  round GameRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+}
+
+model DailyChallenge {
+  id          String               @id @default(cuid())
+  product     Product              @default(HOMES)
+  /// UTC date, YYYY-MM-DD.
+  date        String
+  status      DailyChallengeStatus @default(PUBLISHED)
+  /// true = produced by the deterministic generator, false = curated by an admin.
+  generated   Boolean              @default(true)
+  publishedAt DateTime?
+  createdById String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  rounds DailyChallengeRound[]
+  games  Game[]
+
+  @@unique([product, date])
+}
+
+model DailyChallengeRound {
+  id          String @id @default(cuid())
+  challengeId String
+  index       Int
+  propertyId  String
+
+  challenge DailyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  property  Property       @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+
+  @@unique([challengeId, index])
+  @@unique([challengeId, propertyId])
+}
+
+model LeaderboardEntry {
+  id        String           @id @default(cuid())
+  product   Product          @default(HOMES)
+  scope     LeaderboardScope
+  /// "all" (GLOBAL), date (DAILY), city slug (CITY), country code (COUNTRY).
+  scopeKey  String
+  userId    String
+  gameId    String
+  score     Int
+  accuracy  Float
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  /// Best result per player per board.
+  @@unique([product, scope, scopeKey, userId])
+  @@index([product, scope, scopeKey, score])
+}
+
+// ─── Money ───────────────────────────────────────────────────────────────
+
+/// Paid entitlements (24h pass today, PRO later).
+model Subscription {
+  id                     String             @id @default(cuid())
+  userId                 String
+  type                   EntitlementType
+  status                 SubscriptionStatus @default(PENDING)
+  provider               String
+  /// Stripe Checkout session id (or mock id). Unique so fulfilment is idempotent.
+  providerSessionId      String?            @unique
+  providerSubscriptionId String?
+  amountCents            Int?
+  currency               String?
+  startsAt               DateTime?
+  expiresAt              DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, expiresAt])
+}
+
+// ─── Operations ──────────────────────────────────────────────────────────
+
+model AdminAuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  name      String
+  userId    String?
+  props     Json?
+  createdAt DateTime @default(now())
+
+  @@index([name, createdAt])
+  @@index([createdAt])
+}
+
+/// Lightweight anti-cheat / abuse signals for admins to review.
+model SecurityEvent {
+  id        String   @id @default(cuid())
+  kind      String
+  userId    String?
+  ip        String?
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([kind, createdAt])
+}
